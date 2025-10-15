@@ -1,45 +1,69 @@
 export default async function handler(req, res) {
   try {
+    // Extract path after /api/proxy/
     const path = req.url.replace(/^\/api\/proxy\//, "") || "";
-    const mirror = "https://vidfast.pro";
-    const userAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/127.0 Safari/537.36";
-    const referer = "https://vidfast.pro";
 
-    const upstream = await fetch(`${mirror}/${path}`, {
+    // Mirrors to rotate per request
+    const mirrors = [
+      "https://autoembed.co",    
+
+      
+    ];
+
+    // User-agents rotation
+    const userAgents = [
+      "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/127.0 Safari/537.36",
+      "Mozilla/5.0 (Macintosh; Intel Mac OS X 13_6) AppleWebKit/605.1.15 Safari/605.1.15",
+      "Mozilla/5.0 (Linux; Android 13; SM-G991B) AppleWebKit/537.36 Chrome/127.0 Mobile Safari/537.36"
+    ];
+
+    // Referer rotation
+    const referers = [
+      "https://autoembed.co",      
+      
+     
+    ];
+
+    // --- Randomly select one of each per request ---
+    const mirror = mirrors[Math.floor(Math.random() * mirrors.length)];
+    const userAgent = userAgents[Math.floor(Math.random() * userAgents.length)];
+    const referer = referers[Math.floor(Math.random() * referers.length)];
+
+    // Fetch upstream content
+    const upstream = await fetch(mirror + "/" + path, {
       headers: {
         "User-Agent": userAgent,
         "Referer": referer
       }
     });
 
-    if (!upstream.ok) {
-      throw new Error(`Upstream request failed: ${upstream.status}`);
-    }
+    if (!upstream.ok) throw new Error(`Upstream request failed: ${upstream.status}`);
 
     const contentType = upstream.headers.get("content-type") || "";
 
-    // Handle non-HTML content (e.g., video streams)
-    if (contentType.includes("video/")) {
-      res.setHeader("Content-Type", contentType);
-      res.setHeader("Access-Control-Allow-Origin", "*");
-      upstream.body.pipeTo(res);
-      return;
+    // Pass-through for non-HTML
+    if (!contentType.includes("text/html")) {
+      const buffer = Buffer.from(await upstream.arrayBuffer());
+      res.setHeader("access-control-allow-origin", "*");
+      res.setHeader("content-type", contentType);
+      return res.status(upstream.status).send(buffer);
     }
 
-    // HTML content processing (e.g., removing popups)
+    // HTML content: remove popups & ads
     let html = await upstream.text();
-    html = html.replace(/window\.open\(.*?\);?/g, "")
-               .replace(/<script[^>]*>[^<]*(popup|click|ad|redirect|atob)[^<]*<\/script>/gi, "")
-               .replace(/eval\(atob\(.*?\)\);?/gi, "")
-               .replace(/onbeforeunload=.*?['"]/gi, "");
+    html = html
+      .replace(/window\.open\(.*?\);?/g, "")
+      .replace(/<script[^>]*>[^<]*(popup|click|ad|redirect|atob)[^<]*<\/script>/gi, "")
+      .replace(/eval\(atob\(.*?\)\);?/gi, "")
+      .replace(/onbeforeunload=.*?['"]/gi, "");
 
-    // Inject anti-popup and player fullscreen fix
+    // Inject anti-popup & player fullscreen fix
     const injection = `
       <script>
         (() => {
           const blockAds = () => {
             document.querySelectorAll("script").forEach(s => {
-              if (/ads?|popup|popunder|redirect|click/i.test(s.innerHTML)) s.remove();
+              if (/atob|ads|popunder|redirect/i.test(s.innerHTML)) s.remove();
             });
             window.open = () => null;
             document.querySelectorAll("a").forEach(a => {
@@ -71,10 +95,14 @@ export default async function handler(req, res) {
     `;
     html = html.replace(/<\/body>/i, `${injection}</body>`);
 
+    // Send response
     res.status(upstream.status);
-    res.setHeader("Content-Type", "text/html; charset=utf-8");
-    res.setHeader("Access-Control-Allow-Origin", "*");
-    res.setHeader("Content-Security-Policy", "default-src * data: blob: 'unsafe-inline' 'unsafe-eval'; frame-src *; media-src * data: blob:;");
+    res.setHeader("content-type", "text/html; charset=utf-8");
+    res.setHeader("access-control-allow-origin", "*");
+    res.setHeader(
+      "content-security-policy",
+      "default-src * data: blob: 'unsafe-inline' 'unsafe-eval'; frame-src *; media-src * data: blob:;"
+    );
     res.send(html);
 
   } catch (err) {
