@@ -1,13 +1,13 @@
 export default async function handler(req, res) {
   try {
     const path = req.url.replace(/^\/api\/proxy/, "");
-    const target = `https://spencerdevs.xyz${path}`;
+    const target = `https://filmku.stream${path}`;
 
     const upstream = await fetch(target, {
       headers: {
         "user-agent":
           "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/127.0 Safari/537.36",
-        referer: "https://spencerdevs.xyz",
+        referer: "https://filmku.stream",
       },
     });
 
