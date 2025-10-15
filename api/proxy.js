@@ -3,7 +3,7 @@ export default async function handler(req, res) {
     // Extract path after /api/proxy/
     const path = req.url.replace(/^\/api\/proxy\//, "") || "";
 
-    // Mirrors to rotate per request
+    // Mirrors rotation
     const mirrors = ["https://vidfast.pro"];
 
     // User-agents rotation
@@ -16,17 +16,14 @@ export default async function handler(req, res) {
     // Referer rotation
     const referers = ["https://vidfast.pro"];
 
-    // Randomly select one of each per request
+    // Random selection
     const mirror = mirrors[Math.floor(Math.random() * mirrors.length)];
     const userAgent = userAgents[Math.floor(Math.random() * userAgents.length)];
     const referer = referers[Math.floor(Math.random() * referers.length)];
 
     // Fetch upstream content
     const upstream = await fetch(`${mirror}/${path}`, {
-      headers: {
-        "User-Agent": userAgent,
-        "Referer": referer
-      }
+      headers: { "User-Agent": userAgent, "Referer": referer }
     });
 
     if (!upstream.ok)
@@ -34,53 +31,76 @@ export default async function handler(req, res) {
 
     const contentType = upstream.headers.get("content-type") || "";
 
-    // Pass-through for non-HTML (e.g., video, JSON, binary)
+    // Pass-through for non-HTML (video, JSON, etc.)
     if (!contentType.includes("text/html")) {
       const buffer = Buffer.from(await upstream.arrayBuffer());
-      res.setHeader("access-control-allow-origin", "*");
-      res.setHeader("content-type", contentType);
+      res.setHeader("Access-Control-Allow-Origin", "*");
+      res.setHeader("Content-Type", contentType);
       return res.status(upstream.status).send(buffer);
     }
 
-    // HTML content: remove popups & ads
+    // HTML: remove ads/popups safely
     let html = await upstream.text();
-    html = html
-      .replace(/window\.open\(.*?\);?/g, "")
-      .replace(
-        /<script[^>]*>[^<]*(popup|click|ad|redirect|atob)[^<]*<\/script>/gi,
-        ""
-      )
-      .replace(/eval\(atob\(.*?\)\);?/gi, "")
-      .replace(/onbeforeunload=.*?['"]/gi, "");
 
-    // Inject anti-popup script with dynamic MutationObserver
+    // Remove inline popup scripts, but keep player scripts
+    html = html.replace(
+      /<script[^>]*>[^<]*(ads?|popup|popunder|redirect|click)[^<]*<\/script>/gi,
+      ""
+    );
+
+    // Inject safe anti-popup + fullscreen fix
     const injection = `
       <script>
         (() => {
           const blockAds = () => {
+            // Remove script tags that are clearly ads/popups
             document.querySelectorAll("script").forEach(s => {
-              if (/ads|popup|popunder|redirect|click/i.test(s.innerHTML)) s.remove();
+              if (/ads?|popup|popunder|redirect|click/i.test(s.innerHTML)) s.remove();
             });
+
+            // Prevent popup windows
             window.open = () => null;
+
+            // Remove links to ad domains
             document.querySelectorAll("a").forEach(a => {
-              if (/ads?|sponsor|click|redirect/i.test(a.href)) a.removeAttribute("href");
+              if (/ads?|sponsor|popunder|click|redirect/i.test(a.href)) a.removeAttribute("href");
+            });
+
+            // Remove extra iframes (keep player)
+            document.querySelectorAll("iframe").forEach(f => {
+              const id = f.id || f.className || "";
+              if (!/player/i.test(id)) f.remove();
             });
           };
 
           // Initial blocking
           blockAds();
 
-          // Continuously monitor for new elements added to the DOM
+          // Continuously monitor DOM for new ads/popups
           const observer = new MutationObserver(blockAds);
           observer.observe(document.documentElement, { childList: true, subtree: true });
 
-          // Also block ads after page load
+          // Also run after page load
           window.addEventListener("load", blockAds);
+
+          // Fullscreen player fix
+          const fixPlayer = () => {
+            const p = document.querySelector("iframe, video, #player, .player");
+            if (p) Object.assign(p.style, {
+              width: "100vw",
+              height: "100vh",
+              position: "fixed",
+              top: "0",
+              left: "0",
+              zIndex: "9999"
+            });
+          };
+          window.addEventListener("load", fixPlayer);
         })();
       </script>
       <style>
-        html,body {margin:0;padding:0;background:#000;overflow:hidden;height:100vh;}
-        iframe,video,#player,.player {width:100vw!important;height:100vh!important;border:none!important;display:block!important;}
+        html, body {margin:0; padding:0; background:#000; overflow:hidden; height:100vh;}
+        iframe, video, #player, .player {width:100vw!important; height:100vh!important; border:none!important; display:block!important;}
       </style>
     `;
 
@@ -88,10 +108,10 @@ export default async function handler(req, res) {
 
     // Send response
     res.status(upstream.status);
-    res.setHeader("content-type", "text/html; charset=utf-8");
-    res.setHeader("access-control-allow-origin", "*");
+    res.setHeader("Content-Type", "text/html; charset=utf-8");
+    res.setHeader("Access-Control-Allow-Origin", "*");
     res.setHeader(
-      "content-security-policy",
+      "Content-Security-Policy",
       "default-src * data: blob: 'unsafe-inline' 'unsafe-eval'; frame-src *; media-src * data: blob:;"
     );
     res.send(html);
