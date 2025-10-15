@@ -5,7 +5,7 @@ export default async function handler(req, res) {
     const path = req.url.replace(/^\/api\/proxy\//, "") || "";
 
     const mirrors = [
-      "https://vidrock.net",
+      "https://spencerdevs.xyz",
   
     ];
 
@@ -16,7 +16,7 @@ export default async function handler(req, res) {
     ];
 
     const referers = [
-      "https://vidrock.net",
+      "https://spencerdevs.xyz",
 
     ];
 
