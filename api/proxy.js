@@ -1,62 +1,33 @@
-let currentMirrorIndex = 0; // Global counter to rotate mirrors
-
 export default async function handler(req, res) {
   try {
-    const path = req.url.replace(/^\/api\/proxy\//, "") || "";
+    const path = req.url.replace(/^\/api\/proxy/, "");
+    const target = `https://spencerdevs.xyz${path}`;
 
-    const mirrors = [
-      "https://spencerdevs.xyz",
-  
-    ];
-
-    const userAgents = [
-      "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/127.0 Safari/537.36",
-      "Mozilla/5.0 (Macintosh; Intel Mac OS X 13_6) AppleWebKit/605.1.15 Safari/605.1.15",
-      "Mozilla/5.0 (Linux; Android 13; SM-G991B) AppleWebKit/537.36 Chrome/127.0 Mobile Safari/537.36"
-    ];
-
-    const referers = [
-      "https://spencerdevs.xyz",
-
-    ];
-
-    // Get mirror sequentially and cycle through them
-    const mirror = mirrors[currentMirrorIndex];
-    const referer = referers[currentMirrorIndex];
-    const userAgent = userAgents[currentMirrorIndex % userAgents.length];
-
-    // Increment index and wrap around when reaching the end
-    currentMirrorIndex = (currentMirrorIndex + 1) % mirrors.length;
-
-    const upstream = await fetch(`${mirror}/${path}`, {
+    const upstream = await fetch(target, {
       headers: {
-        "User-Agent": userAgent,
-        "Referer": referer
-      }
+        "user-agent":
+          "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/127.0 Safari/537.36",
+        referer: "https://spencerdevs.xyz",
+      },
     });
-
-    if (!upstream.ok)
-      throw new Error(`Upstream request failed: ${upstream.status}`);
 
     const contentType = upstream.headers.get("content-type") || "";
 
     if (!contentType.includes("text/html")) {
-      const buffer = Buffer.from(await upstream.arrayBuffer());
       res.setHeader("access-control-allow-origin", "*");
       res.setHeader("content-type", contentType);
+      const buffer = Buffer.from(await upstream.arrayBuffer());
       return res.status(upstream.status).send(buffer);
     }
 
     let html = await upstream.text();
 
-    // Strip ads/popups
+    // Remove ad scripts
     html = html
-      .replace(/window\.open\(.*?\);?/g, "")
-      .replace(/<script[^>]*>[^<]*(popup|click|ad|redirect|atob)[^<]*<\/script>/gi, "")
-      .replace(/eval\(atob\(.*?\)\);?/gi, "")
-      .replace(/onbeforeunload=.*?['"]/gi, "");
+      .replace(/<script[^>]*>[^<]*(ads|popunder|atob|redirect)[^<]*<\/script>/gi, "")
+      .replace(/eval\(atob\([^)]*\)\);?/gi, "")
+      .replace(/window\.open\s*=\s*[^;]+;/gi, "window.open = () => null;");
 
-    // Inject safe fullscreen and ad-blocking
     const injection = `
       <script>
         (() => {
@@ -75,12 +46,8 @@ export default async function handler(req, res) {
           const fixPlayer = () => {
             const p = document.querySelector("iframe, video, #player, .player");
             if (p) Object.assign(p.style, {
-              width: "100vw",
-              height: "100vh",
-              position: "fixed",
-              top: "0",
-              left: "0",
-              zIndex: "9999"
+              width: "100vw", height: "100vh", position: "fixed",
+              top: "0", left: "0", zIndex: "9999"
             });
           };
           new MutationObserver(fixPlayer).observe(document.body, { childList: true, subtree: true });
@@ -89,7 +56,10 @@ export default async function handler(req, res) {
       </script>
       <style>
         html,body {margin:0;padding:0;background:#000;overflow:hidden;height:100vh;}
-        iframe,video,#player,.player {width:100vw!important;height:100vh!important;border:none!important;display:block!important;}
+        iframe,video,#player,.player {
+          width:100vw!important;height:100vh!important;
+          border:none!important;display:block!important;
+        }
       </style>
     `;
     html = html.replace(/<\/body>/i, `${injection}</body>`);
@@ -102,9 +72,7 @@ export default async function handler(req, res) {
       "default-src * data: blob: 'unsafe-inline' 'unsafe-eval'; frame-src *; media-src * data: blob:;"
     );
     res.send(html);
-
   } catch (err) {
-    console.error("Proxy error:", err);
     res.status(500).json({ error: "Proxy failed", details: err.message });
   }
 }
